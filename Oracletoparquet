@@ -1,0 +1,30 @@
+# Python example using Apache Beam
+import apache_beam as beam
+from apache_beam.options.pipeline_options import PipelineOptions
+from apache_beam.io.jdbc import ReadFromJdbc
+
+def run_pipeline():
+    pipeline_options = PipelineOptions(
+        project='your-project-id',
+        runner='DataflowRunner',
+        region='us-central1',
+        temp_location='gs://your-bucket/temp'
+    )
+    
+    with beam.Pipeline(options=pipeline_options) as p:
+        (p
+         | 'Read from Oracle' >> ReadFromJdbc(
+             table_name='your_table',
+             driver_class_name='oracle.jdbc.OracleDriver',
+             jdbc_url='jdbc:oracle:thin:username/password@host:port:SID',
+             query='SELECT * FROM your_table'  # or use table_name
+         )
+         | 'Write to Parquet' >> beam.io.WriteToParquet(
+             'gs://your-bucket/output/',
+             schema=your_schema,  # Define your schema here
+             file_name_suffix='.parquet'
+         )
+        )
+
+if __name__ == '__main__':
+    run_pipeline()

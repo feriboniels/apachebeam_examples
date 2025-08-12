@@ -1,0 +1,115 @@
+# Cómo Insertar Deltas en Apache Beam
+
+Para manejar inserciones delta (solo cambios incrementales) en Apache Beam, tienes varias opciones dependiendo de tu fuente de datos y destino. Aquí te explico los principales enfoques:
+
+## 1. Para Bases de Datos (Oracle, PostgreSQL, etc.)
+
+### Usando JdbcIO con consultas de cambios
+
+```python
+from apache_beam.io.jdbc import ReadFromJdbc, WriteToJdbc
+
+# Leer solo registros modificados desde Oracle
+with beam.Pipeline() as p:
+    changes = (p 
+        | 'Leer cambios' >> ReadFromJdbc(
+            table_name='mi_tabla',
+            driver_class_name='oracle.jdbc.OracleDriver',
+            jdbc_url='jdbc:oracle:thin:user/pass@host:port:SID',
+            query='SELECT * FROM mi_tabla WHERE last_modified > SYSDATE-1'
+        )
+        # ... transformaciones ...
+        | 'Escribir delta' >> WriteToJdbc(
+            table_name='tabla_destino',
+            driver_class_name='org.postgresql.Driver',
+            jdbc_url='jdbc:postgresql://host:port/db',
+            statement=(
+                'INSERT INTO tabla_destino VALUES(?, ?, ?) '
+                'ON CONFLICT (id) DO UPDATE SET '
+                'campo1 = EXCLUDED.campo1, '
+                'campo2 = EXCLUDED.campo2'
+            )
+        )
+    )
+```
+
+## 2. Para Archivos (Delta Lake, Parquet)
+
+### Usando Beam con Delta Lake
+
+```python
+from delta import DeltaTable
+import pyspark
+
+spark = pyspark.sql.SparkSession.builder \
+    .config("spark.jars.packages", "io.delta:delta-core_2.12:1.0.0") \
+    .getOrCreate()
+
+# Leer datos nuevos
+new_data = spark.read.parquet("gs://bucket/nuevos_datos.parquet")
+
+# Escribir como delta
+new_data.write.format("delta") \
+    .mode("append") \  # o "overwrite"
+    .save("gs://bucket/delta_table")
+```
+
+## 3. Enfoque Genérico para Deltas
+
+### Patrón de Merge en Beam
+
+```python
+def merge_deltas(existing, new):
+    # Lógica para mezclar registros existentes con nuevos
+    return {**existing, **new}
+
+with beam.Pipeline() as p:
+    # 1. Leer datos existentes
+    existing_data = (p 
+        | 'Leer base' >> beam.io.ReadFromParquet('gs://bucket/existing_data/*')
+        | 'Como pares KV' >> beam.Map(lambda x: (x['id'], x))
+    )
+    
+    # 2. Leer nuevos datos/deltas
+    new_data = (p
+        | 'Leer deltas' >> beam.io.ReadFromParquet('gs://bucket/deltas/*')
+        | 'Nuevos como KV' >> beam.Map(lambda x: (x['id'], x))
+    )
+    
+    # 3. Combinar
+    merged = ((existing_data, new_data) 
+        | beam.CoGroupByKey()
+        | beam.Map(lambda x: merge_deltas(x[1][0][0], x[1][1][0]))
+    )
+    
+    # 4. Escribir resultado
+    merged | beam.io.WriteToParquet('gs://bucket/merged_output')
+```
+
+## 4. Para BigQuery (Upsert)
+
+```python
+from apache_beam.io.gcp.bigquery import WriteToBigQuery
+
+with beam.Pipeline() as p:
+    (p
+     | beam.io.ReadFromParquet('gs://bucket/deltas/*')
+     | 'Write to BQ' >> WriteToBigQuery(
+         table='project:dataset.table',
+         write_disposition=beam.io.BigQueryDisposition.WRITE_APPEND,
+         create_disposition=beam.io.BigQueryDisposition.CREATE_IF_NEEDED,
+         method='STORAGE_WRITE_API',
+         triggering_frequency=60,
+         schema='id:STRING,field1:STRING,field2:INTEGER'
+     )
+    )
+```
+
+## Recomendaciones para Deltas
+
+1. **Identifica claves únicas**: Necesitas una columna que identifique registros únicos para hacer merge
+2. **Marca temporal**: Incluye campos como `last_updated` para identificar cambios
+3. **Particionamiento**: Organiza tus datos por fechas u otros criterios para procesamiento eficiente
+4. **Checkpointing**: En streaming, usa ventanas para procesar deltas en lotes
+
+¿Necesitas que profundice en algún enfoque específico o tienes algún requisito particular para tu implementación de deltas?

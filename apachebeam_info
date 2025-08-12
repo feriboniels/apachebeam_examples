@@ -1,0 +1,108 @@
+# Apache Beam: Guía Completa
+
+Apache Beam es un modelo de procesamiento de datos unificado para pipelines por lotes (batch) y en flujo (streaming). Es un proyecto de código abierto que simplifica el procesamiento distribuido de datos a gran escala .
+
+## Conceptos Fundamentales
+
+### 1. Modelo de Programación Unificado
+
+Apache Beam ofrece un único modelo de programación que funciona tanto para procesamiento por lotes como en flujo continuo. Esto significa que puedes escribir tu pipeline una vez y ejecutarlo en diferentes contextos sin modificar el código .
+
+**Características clave:**
+- **Unificado:** Mismo modelo para batch y streaming
+- **Extensible:** Permite construir componentes personalizados
+- **Portátil:** Ejecutable en múltiples runners (Dataflow, Flink, Spark, etc.)
+- **Open Source:** Desarrollo comunitario activo 
+
+### 2. Componentes Principales
+
+#### Pipeline
+El objeto `Pipeline` encapsula toda tu tarea de procesamiento de datos, desde la lectura de entrada hasta la escritura de salida. Es el punto de partida de cualquier programa Beam .
+
+```python
+import apache_beam as beam
+
+with beam.Pipeline() as pipeline:
+    # Aquí construyes tu pipeline
+    pass
+```
+
+#### PCollection
+Representa un conjunto de datos distribuido que tu pipeline procesa. Puede ser:
+- **Acotado (Bounded):** Datos de tamaño fijo (como un archivo)
+- **No acotado (Unbounded):** Datos que llegan continuamente (como un stream) 
+
+#### PTransform
+Son las operaciones de procesamiento que aplicas a los datos. Toman una o más `PCollection` como entrada y producen cero o más `PCollection` como salida .
+
+### 3. Ejecución de Pipelines
+
+El proceso típico para construir y ejecutar un pipeline incluye:
+1. Crear el objeto `Pipeline` y configurar las opciones
+2. Definir la `PCollection` inicial (leyendo datos o creándola en memoria)
+3. Aplicar `PTransforms` para procesar los datos
+4. Escribir los resultados finales usando operaciones de salida (sinks) 
+
+## Transformaciones Comunes
+
+### 1. ParDo
+Es la operación central de procesamiento paralelo en Beam. Aplica una función definida por el usuario (`DoFn`) a cada elemento de la `PCollection` de entrada .
+
+Ejemplo:
+```python
+class ExtractWords(beam.DoFn):
+    def process(self, element):
+        return element.split()
+
+lines = pipeline | beam.Create(['Hola mundo', 'Apache Beam es genial'])
+words = lines | beam.ParDo(ExtractWords())
+```
+
+### 2. Transformaciones de Agregación
+- **GroupByKey:** Agrupa elementos por clave
+- **Combine:** Combina elementos (como sumas, promedios)
+- **Count:** Cuenta elementos o pares clave-valor 
+
+### 3. I/O (Entrada/Salida)
+Beam incluye conectores para leer y escribir en diversos sistemas:
+- **TextIO:** Para archivos de texto
+- **BigQueryIO:** Para Google BigQuery
+- **JdbcIO:** Para bases de datos relacionales 
+
+## Ejemplo Completo: Contador de Palabras
+
+```python
+import apache_beam as beam
+from apache_beam.options.pipeline_options import PipelineOptions
+
+# Configuración del pipeline
+options = PipelineOptions()
+p = beam.Pipeline(options=options)
+
+# Construcción del pipeline
+(p
+ | beam.io.ReadFromText('gs://ruta/al/archivo.txt')  # Lee el archivo
+ | beam.FlatMap(lambda line: line.split())           # Divide en palabras
+ | beam.combiners.Count.PerElement()                 # Cuenta cada palabra
+ | beam.io.WriteToText('gs://ruta/salida/resultados') # Escribe resultados
+)
+
+# Ejecución
+p.run()
+```
+
+## Runners (Motores de Ejecución)
+
+Beam es portable y puede ejecutarse en diferentes backends:
+1. **DirectRunner:** Para pruebas locales
+2. **DataflowRunner:** Para ejecución en Google Cloud Dataflow
+3. **FlinkRunner:** Para Apache Flink
+4. **SparkRunner:** Para Apache Spark 
+
+## Para Aprender Más
+
+1. **Beam Playground:** Entorno interactivo para probar transformaciones Beam sin instalación 
+2. **Guía de Programación:** Documentación oficial con ejemplos en múltiples lenguajes 
+3. **Modelo de Programación:** Explicación detallada de los conceptos en la documentación de Dataflow 
+
+Apache Beam es una herramienta poderosa para el procesamiento de datos a gran escala, con una curva de aprendizaje accesible gracias a su modelo de programación unificado y abstracciones bien diseñadas.

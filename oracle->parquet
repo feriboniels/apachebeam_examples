@@ -1,0 +1,46 @@
+import apache_beam as beam
+from apache_beam.io.jdbc import ReadFromJdbc
+from apache_beam import Row
+import pyarrow as pa
+
+
+schemadef = pa.schema([
+    ('Nombre', pa.string()),
+    ('Apellido', pa.string()),
+    ('Edad', pa.string()),
+    ('Colonia', pa.string()),
+    ('Cp', pa.string()),
+])
+
+
+
+with beam.Pipeline() as p:
+    oracle_data = (
+        p
+        | 'Read from Oracle' >> ReadFromJdbc(
+            driver_class_name='oracle.jdbc.driver.OracleDriver',
+            jdbc_url='jdbc:oracle:thin:@0.0.0.0:55001:ORCLCDB',
+            username='SYSTEM',
+            password='lXzOBe5W/JY=1',
+            query='SELECT nombre , apellido , edad, colonia ,cp FROM gentera.usuarios',
+            table_name='gentera.usuarios',
+            classpath=['/Users/fegarciahxv/Py_studiocode/Connectores/ojdbc8.jar']  # Path to your Oracle JDBC driver JAR
+        )
+        )
+    processed_data = (
+        oracle_data
+        | 'To Dict' >> beam.Map(lambda row: {
+            'Nombre': row[0],
+            'Apellido': row[1],
+            'Edad':str(row[2]),
+            'Colonia': row[3],
+            'Cp': row[4]
+        })
+        #| 'Filter IT' >> beam.Filter(lambda x: x['departamento'] == 'IT')
+        #| 'Print' >> beam.Map(print)
+        | 'Write to Parquet' >> beam.io.WriteToParquet(
+            file_path_prefix='/Users/fegarciahxv/Py_studiocode/Connectores/pruebasalida',
+            schema=schemadef,  # Define your schema here
+            file_name_suffix='.parquet'    
+        )
+    )

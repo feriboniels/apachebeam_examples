@@ -1,0 +1,14 @@
+SELECT 
+    nm.nspname AS esquema,
+    re.relname AS tabla,
+    a.attname  AS columna,
+    t.typname  AS tipo_dato,
+    s.relname  AS nombre_secuencia
+FROM pg_class s
+JOIN pg_depend d ON d.objid = s.oid
+JOIN pg_class re ON deid = re.oid
+JOIN pg_attribute a ON (d.refobjid = a.attrelid AND d.refobjsubid = a.attnum)
+JOIN pg_namespace nm ON nm.oid = re.relnamespace
+JOIN pg_type t ON a.atttypid = t.oid
+WHERE s.relkind = 'S' 
+  AND nm.nspname NOT IN ('pg_catalog', 'information_schema');

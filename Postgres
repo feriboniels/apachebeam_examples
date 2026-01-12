@@ -12,3 +12,22 @@ JOIN pg_namespace nm ON nm.oid = re.relnamespace
 JOIN pg_type t ON a.atttypid = t.oid
 WHERE s.relkind = 'S' 
   AND nm.nspname NOT IN ('pg_catalog', 'information_schema');
+
+
+-- Todas las PKs y FKs juntas
+SELECT
+    n.nspname as schema,
+    c.relname as table_name,
+    con.conname as constraint_name,
+    CASE contype 
+        WHEN 'p' THEN 'PRIMARY KEY'
+        WHEN 'f' THEN 'FOREIGN KEY'
+        WHEN 'u' THEN 'UNIQUE'
+        ELSE contype::text
+    END as constraint_type,
+    pg_get_constraintdef(con.oid) as definition
+FROM pg_constraint con
+JOIN pg_class c ON c.oid = con.conrelid
+JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE contype IN ('p', 'f')
+ORDER BY n.nspname, c.relname, contype;

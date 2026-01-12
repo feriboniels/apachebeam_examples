@@ -31,3 +31,271 @@ JOIN pg_class c ON c.oid = con.conrelid
 JOIN pg_namespace n ON n.oid = c.relnamespace
 WHERE contype IN ('p', 'f')
 ORDER BY n.nspname, c.relname, contype;
+
+
+
+# Arquitectura y Estructura de PostgreSQL
+
+## **1. Estructura de Archivos en Disco**
+
+### **Directorios Principales:**
+```
+/var/lib/postgresql/    # Ubicación común en Linux
+├── /data/              # Directorio de datos principal
+│   ├── /base/          # Bases de datos (el núcleo)
+│   │   ├── 1/          # OID de la BD template1
+│   │   ├── 13895/      # OID de tu BD (ej: mi_bd)
+│   │   │   ├── 1417    # Archivo de tabla 'usuarios'
+│   │   │   ├── 1418    # Archivo de tabla 'pedidos'
+│   │   │   └── ...
+│   ├── /global/        # Tablas del sistema globales
+│   ├── /pg_wal/        # Write-Ahead Logs (WAL)
+│   ├── /pg_xact/       # Transacciones (commit logs)
+│   ├── pg_hba.conf     # Autenticación
+│   ├── postgresql.conf # Configuración principal
+│   └── postmaster.pid  # PID del proceso principal
+```
+
+### **Estructura Interna de una Base de Datos:**
+```sql
+-- Ver OIDs y relaciones
+SELECT oid, datname FROM pg_database;
+SELECT oid, relname FROM pg_class WHERE relkind = 'r';
+```
+
+## **2. Estructura Lógica (Jerarquía)**
+
+```
+Instancia PostgreSQL (Cluster)
+│
+├── Databases (Bases de Datos)
+│   │
+│   ├── Schemas (Esquemas)
+│   │   │
+│   │   ├── Tables (Tablas)
+│   │   │   ├── Rows (Filas/Tuplas)
+│   │   │   └── Columns (Columnas)
+│   │   │
+│   │   ├── Views (Vistas)
+│   │   ├── Indexes (Índices)
+│   │   ├── Sequences (Secuencias)
+│   │   ├── Functions (Funciones)
+│   │   └── Types (Tipos)
+│   │
+│   └── Templates (template0, template1)
+│
+├── Tablespaces (Espacios de Tablas)
+│   ├── pg_default
+│   └── pg_global
+│
+└── Roles/Users (Roles/Usuarios)
+    ├── Login Roles
+    ├── Group Roles
+    └── Superuser
+```
+
+## **3. Procesos de PostgreSQL (Arquitectura)**
+
+```
+Procesos Principales:
+postmaster (PID principal)
+├── postgres (backend process) → por cada conexión
+├── bgwriter   (background writer)
+├── checkpointer
+├── autovacuum launcher
+├── WAL writer
+├── stats collector
+└── logger
+```
+
+## **4. Modelo de Almacenamiento**
+
+### **Estructura de una Tabla:**
+```
+Heap File (archivo de tabla)
+├── Page 0 (Bloque 0) - 8KB
+│   ├── Page Header (24 bytes)
+│   ├── Item pointers array
+│   ├── Free space
+│   └── Tuples (datos)
+├── Page 1 (Bloque 1)
+├── ...
+└── TOAST (The Oversized-Attribute Storage Technique)
+    Para datos > 2KB
+```
+
+### **Metadatos del Sistema:**
+```sql
+-- Catalogo del sistema (tablas del sistema)
+SELECT * FROM pg_tables;          -- Tablas
+SELECT * FROM pg_views;           -- Vistas
+SELECT * FROM pg_indexes;         -- Índices
+SELECT * FROM pg_proc;            -- Funciones
+SELECT * FROM pg_database;        -- Bases de datos
+SELECT * FROM pg_namespace;       -- Esquemas
+```
+
+## **5. Estructura de un Row (Tuple)**
+
+```c
+struct HeapTupleHeaderData {
+    uint32 t_xmin;       // ID transacción que insertó
+    uint32 t_xmax;       // ID transacción que eliminó/actualizó
+    uint32 t_cid;        // Command ID
+    uint32 t_ctid;       // (block#, offset#) para versionado
+    uint16 t_infomask2;  // bits de atributos
+    uint16 t_infomask;   // bits de estado
+    uint8 t_hoff;        // tamaño del header
+    bits[] t_bits;       // bitmap de NULLs
+};
+```
+
+## **6. Tablas del Sistema Principales**
+
+### **Catálogo de Sistema (System Catalog):**
+```sql
+-- Esquema pg_catalog (núcleo del sistema)
+-- Tablas críticas:
+pg_class     → Tablas, índices, vistas, sequences
+pg_attribute → Columnas de las tablas
+pg_type      → Tipos de datos
+pg_index     → Información de índices
+pg_constraint→ Constraints (PK, FK, etc.)
+pg_proc      → Funciones almacenadas
+pg_namespace → Esquemas
+pg_database  → Bases de datos
+pg_tablespace→ Tablespaces
+```
+
+## **7. Ejemplo Práctico de Exploración**
+
+```sql
+-- 1. Ver estructura de una tabla específica
+SELECT 
+    attname as columna,
+    typname as tipo,
+    attlen as longitud,
+    attnotnull as not_null
+FROM pg_attribute a
+JOIN pg_type t ON a.atttypid = t.oid
+WHERE attrelid = 'mi_tabla'::regclass
+AND attnum > 0
+ORDER BY attnum;
+
+-- 2. Ver relaciones entre tablas
+SELECT
+    conname as constraint,
+    conrelid::regclass as tabla_origen,
+    a.attname as columna_origen,
+    confrelid::regclass as tabla_destino,
+    af.attname as columna_destino
+FROM pg_constraint c
+JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY(c.conkey)
+JOIN pg_attribute af ON af.attrelid = c.confrelid AND af.attnum = ANY(c.confkey)
+WHERE contype = 'f';
+
+-- 3. Ver uso de espacio
+SELECT 
+    schemaname,
+    tablename,
+    pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename)) as tamaño_total,
+    pg_size_pretty(pg_relation_size(schemaname||'.'||tablename)) as tamaño_datos,
+    pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename) - 
+                   pg_relation_size(schemaname||'.'||tablename)) as tamaño_indices
+FROM pg_tables
+ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC;
+```
+
+## **8. Organización de Datafiles**
+
+### **Nomenclatura de Archivos:**
+```
+/base/12345/67890
+│
+├── 67890        → Archivo principal de tabla
+├── 67890_fsm    → Free Space Map
+├── 67890_vm     → Visibility Map
+└── 67890_init   → Para tablas no logged
+```
+
+### **Multiversion Concurrency Control (MVCC):**
+```
+Tabla: usuarios
+┌─────┬─────────┬─────────┬─────────┐
+│ ID  │ Nombre  │ t_xmin  │ t_xmax  │
+├─────┼─────────┼─────────┼─────────┤
+│ 1   │ Juan    │ 100     │ 0       │ ← Visible
+│ 1   │ Juan    │ 100     │ 150     │ ← No visible (actualizado)
+│ 1   │ Juan P. │ 150     │ 0       │ ← Visible (nueva versión)
+└─────┴─────────┴─────────┴─────────┘
+```
+
+## **9. WAL (Write-Ahead Logging)**
+
+```
+/pg_wal/
+├── 000000010000000100000001
+├── 000000010000000100000002
+├── ...
+└── archive_status/
+    ├── 000000010000000100000001.done
+    └── ...
+```
+
+## **10. Configuración Jerárquica**
+
+```sql
+-- Niveles de configuración:
+1. Archivo postgresql.conf     → Nivel instancia
+2. ALTER SYSTEM SET ...        → Nivel instancia (sobreescribe)
+3. ALTER DATABASE ... SET ...  → Nivel base de datos
+4. ALTER ROLE ... SET ...      → Nivel usuario
+5. SET ...                     → Nivel sesión
+```
+
+## **11. Ejemplo de Arranque y Operación**
+
+```bash
+# Inicialización del cluster
+initdb -D /var/lib/postgresql/data
+
+# Ver archivos de control
+$PGDATA/
+├── PG_VERSION       # Versión de PostgreSQL
+├── pg_ident.conf    # Mapeo de identidades
+├── pg_hba.conf      # Control de acceso
+└── postgresql.conf  # Configuración
+
+# Procesos en ejecución
+ps aux | grep postgres
+```
+
+## **12. Herramientas de Diagnóstico**
+
+```sql
+-- Ver locks activos
+SELECT * FROM pg_locks;
+
+-- Ver actividad actual
+SELECT * FROM pg_stat_activity;
+
+-- Ver estadísticas de tablas
+SELECT * FROM pg_stat_user_tables;
+
+-- Ver conexiones
+SELECT count(*), state FROM pg_stat_activity GROUP BY state;
+```
+
+## **Flujo de una Consulta:**
+```
+1. Cliente → Connection Request
+2. Postmaster → Fork Backend Process
+3. Parser → Parse Tree
+4. Analyzer → Query Tree
+5. Rewriter → Rewritten Query
+6. Planner → Execution Plan
+7. Executor → Results
+8. Backend → Cliente
+```
+
+¿Te gustaría profundizar en alguna parte específica de la arquitectura?

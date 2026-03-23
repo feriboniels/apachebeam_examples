@@ -1,0 +1,72 @@
+from airflow import DAG
+from airflow.providers.google.cloud.operators.bigquery import BigQueryInsertJobOperator
+from datetime import datetime
+
+# Configuraciones base
+PROJECT_ID = "tu-proyecto"
+DATASET_ID = "tu_dataset"
+TABLE_ID = "tu_tabla"
+BUCKET_NAME = "tu-bucket"
+FILAS_POR_ARCHIVO = 100000  # Ajusta según tus ~85MB
+
+# El Script SQL con la lógica de segmentación y numeración
+SQL_QUERY = f"""
+BEGIN
+  DECLARE total_filas INT64;
+  DECLARE total_archivos INT64;
+  DECLARE inicio INT64 DEFAULT 1;
+  DECLARE fin INT64;
+  DECLARE paso INT64 DEFAULT 1;
+  DECLARE nombre_archivo STRING;
+
+  -- 1. Crear tabla temporal con índice
+  CREATE OR REPLACE TEMP TABLE tabla_segmentada AS
+  SELECT *, ROW_NUMBER() OVER() as fila_id 
+  FROM `{PROJECT_ID}.{DATASET_ID}.{TABLE_ID}`;
+
+  -- 2. Calcular totales para la numeración "1 de X"
+  SET total_filas = (SELECT COUNT(*) FROM tabla_segmentada);
+  SET total_archivos = CAST(CEIL(total_filas / {FILAS_POR_ARCHIVO}) AS INT64);
+
+  -- 3. Bucle de exportación
+  WHILE inicio <= total_filas DO
+    SET fin = inicio + {FILAS_POR_ARCHIVO} - 1;
+    SET nombre_archivo = FORMAT('gs://{BUCKET_NAME}/archivo_%d_de_%d.csv', paso, total_archivos);
+
+    EXECUTE IMMEDIATE FORMAT(\"\"\"
+      EXPORT DATA OPTIONS(
+        uri='%s',
+        format='CSV',
+        overwrite=true,
+        header=true
+      ) AS
+      SELECT * EXCEPT(fila_id) 
+      FROM tabla_segmentada 
+      WHERE fila_id BETWEEN %d AND %d
+    \"\"\", nombre_archivo, inicio, fin);
+
+    SET inicio = inicio + {FILAS_POR_ARCHIVO};
+    SET paso = paso + 1;
+  END WHILE;
+END;
+"""
+
+with DAG(
+    dag_id='export_bq_to_gcs_segmented',
+    start_date=datetime(2024, 1, 1),
+    schedule_interval=None,
+    catchup=False,
+) as dag:
+
+    exportar_segmentado = BigQueryInsertJobOperator(
+        task_id='ejecutar_exportacion_por_bloques',
+        configuration={
+            "query": {
+                "query": SQL_QUERY,
+                "useLegacySql": False,
+            }
+        },
+        project_id=PROJECT_ID,
+    )
+
+    exportar_segmentado
